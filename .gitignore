@@ -1,0 +1,17 @@
+# IDE
+.idea/
+
+# Environment files
+.env
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Binaries
+app/src/todo-app
