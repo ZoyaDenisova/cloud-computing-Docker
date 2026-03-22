@@ -22,14 +22,14 @@ services:
       context: .
       dockerfile: app/Dockerfile
     ports:
-      - "${APP_PORT}:8080"
+      - "${APP_PORT}:${APP_PORT}"
     environment:
-      DB_HOST: db
-      DB_PORT: 5432
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: ${POSTGRES_DB}
-      APP_PORT: 8080
+      APP_PORT: ${APP_PORT}
     depends_on:
       db:
         condition: service_healthy
