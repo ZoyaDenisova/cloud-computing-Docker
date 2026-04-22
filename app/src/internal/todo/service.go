@@ -76,7 +76,7 @@ func normalizeUpdateInput(input UpdateTaskInput) (UpdateTaskInput, error) {
 		return UpdateTaskInput{}, ValidationError{Message: "title is required"}
 	}
 
-	if input.Priority < 1 || input.Priority > 5 {
+	if input.Priority < 1 || input.Priority > 4 {
 		return UpdateTaskInput{}, ValidationError{Message: "priority must be between 1 and 5"}
 	}
 
