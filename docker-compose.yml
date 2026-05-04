@@ -15,30 +15,74 @@ services:
       timeout: 3s
       retries: 10
     networks:
-      - todo_network
+      - kafka_lab_network
 
-  app:
-    build:
-      context: .
-      dockerfile: app/Dockerfile
-    ports:
-      - "${APP_PORT}:${APP_PORT}"
+  kafka:
+    image: apache/kafka:4.2.0
     environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    networks:
+      - kafka_lab_network
+
+  data-service:
+    build:
+      context: ./data-service
+      dockerfile: Dockerfile
+    environment:
+      APP_PORT: ${DATA_SERVICE_PORT}
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: ${POSTGRES_DB}
-      APP_PORT: ${APP_PORT}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      KAFKA_TOPIC: ${KAFKA_TOPIC}
     depends_on:
       db:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     networks:
-      - todo_network
+      - kafka_lab_network
+
+  api-service:
+    build:
+      context: ./api-service
+      dockerfile: Dockerfile
+    ports:
+      - "${API_SERVICE_PORT}:${API_SERVICE_PORT}"
+    environment:
+      APP_PORT: ${API_SERVICE_PORT}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      KAFKA_TOPIC: ${KAFKA_TOPIC}
+      DATA_SERVICE_URL: ${DATA_SERVICE_URL}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      data-service:
+        condition: service_started
+    networks:
+      - kafka_lab_network
 
 volumes:
   postgres_data:
 
 networks:
-  todo_network:
+  kafka_lab_network:
     driver: bridge

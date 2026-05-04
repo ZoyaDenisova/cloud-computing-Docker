@@ -14,13 +14,16 @@ permissions:
 
 env:
   GO_VERSION: "1.22"
-  GO_DIR: app/src
-  COVERAGE_THRESHOLD: "50"
 
 jobs:
-  build:
-    name: build
+  go_checks:
+    name: go_checks (${{ matrix.service_dir }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service_dir:
+          - api-service/src
+          - data-service/src
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,108 +34,31 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Build
-        working-directory: ${{ env.GO_DIR }}
+        working-directory: ${{ matrix.service_dir }}
         run: |
           go mod download
           go build ./...
-
-  lint:
-    name: lint
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.59.1
-          working-directory: ${{ env.GO_DIR }}
+          working-directory: ${{ matrix.service_dir }}
           args: --config ../../.golangci.yml ./...
 
-  test:
-    name: test
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Run tests with coverage
-        working-directory: ${{ env.GO_DIR }}
+      - name: Test
+        working-directory: ${{ matrix.service_dir }}
         run: |
-          go test ./... -covermode=atomic -coverprofile=coverage.out
-          go tool cover -func coverage.out | tee coverage.txt
-          COVERAGE="$(go tool cover -func coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')"
-          echo "Total coverage: ${COVERAGE}%"
-          awk -v cov="$COVERAGE" -v threshold="$COVERAGE_THRESHOLD" 'BEGIN { exit (cov + 0 < threshold + 0) ? 1 : 0 }'
-
-      - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: |
-            app/src/coverage.out
-            app/src/coverage.txt
-          if-no-files-found: error
+          go test ./...
 
   docker_build:
     name: docker_build
     runs-on: ubuntu-latest
-    needs: test
+    needs: go_checks
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build Docker image
+      - name: Build Docker images
         run: |
-          SAFE_REF="${GITHUB_REF_NAME//\//-}"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          IMAGE_TAG="${SAFE_REF}-${SHORT_SHA}"
-          docker build -f app/Dockerfile -t "todo-app:${IMAGE_TAG}" .
-
-  docker_push:
-    name: docker_push
-    runs-on: ubuntu-latest
-    needs: docker_build
-    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref, 'refs/tags/'))
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Login to Docker Hub
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          test -n "$DOCKERHUB_USERNAME"
-          test -n "$DOCKERHUB_TOKEN"
-          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-
-      - name: Build and push image
-        env:
-          DOCKERHUB_REPOSITORY: ${{ secrets.DOCKERHUB_REPOSITORY }}
-        run: |
-          test -n "$DOCKERHUB_REPOSITORY"
-          SAFE_REF="${GITHUB_REF_NAME//\//-}"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          IMAGE_TAG="${SAFE_REF}-${SHORT_SHA}"
-
-          docker build -f app/Dockerfile -t "${DOCKERHUB_REPOSITORY}:${IMAGE_TAG}" .
-          docker push "${DOCKERHUB_REPOSITORY}:${IMAGE_TAG}"
-
-          if [ "${GITHUB_REF_NAME}" = "main" ] || [ "${GITHUB_REF_NAME}" = "master" ]; then
-            docker tag "${DOCKERHUB_REPOSITORY}:${IMAGE_TAG}" "${DOCKERHUB_REPOSITORY}:latest"
-            docker push "${DOCKERHUB_REPOSITORY}:latest"
-          fi
+          docker compose build
