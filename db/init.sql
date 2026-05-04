@@ -1,10 +1,17 @@
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE IF NOT EXISTS posts (
     id BIGSERIAL PRIMARY KEY,
+    author VARCHAR(255) NOT NULL,
     title VARCHAR(255) NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    priority INT NOT NULL CHECK (priority BETWEEN 1 AND 5),
-    due_date DATE,
-    completed BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    body TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS comments (
+    id BIGSERIAL PRIMARY KEY,
+    post_id BIGINT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    author VARCHAR(255) NOT NULL,
+    text TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);

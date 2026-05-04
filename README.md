@@ -1,111 +1,137 @@
-﻿# Todo List (Go + PostgreSQL + Docker)
+﻿# Практическая работа по Kafka
 
-REST API для управления задачами. Приложение и PostgreSQL запускаются в отдельных контейнерах.
+Тематика: **посты и комментарии в соцсети**.
 
-## Функциональность
-- CRUD API:
-  - `POST /tasks`
-  - `GET /tasks`
-  - `GET /tasks/{id}`
-  - `PUT /tasks/{id}`
-  - `DELETE /tasks/{id}`
-- Поля задачи: `title`, `description`, `priority`, `due_date`, `completed`
-- Docker Compose для локального запуска
-- CI/CD pipeline (GitHub Actions): `build`, `lint`, `test`, `docker_build`, `docker_push`
+Система на микросервисной архитектуре с контейнеризацией:
+- `api-service`
+- `data-service`
+- `db` (PostgreSQL)
+- `kafka`
 
-## Структура проекта
-```text
-.
-|-- .github/workflows/ci.yml
-|-- .golangci.yml
-|-- app
-|   |-- Dockerfile
-|   `-- src
-|       |-- cmd/server/main.go
-|       |-- internal
-|       |   |-- config
-|       |   |-- httpapi
-|       |   |-- storage
-|       |   `-- todo
-|       |-- go.mod
-|       `-- go.sum
-|-- db
-|   |-- Dockerfile
-|   `-- init.sql
-|-- docker-compose.yml
-`-- README.md
+Все компоненты запускаются в Docker-сети через `docker compose`.
+
+## Компоненты
+
+### API Service
+HTTP API для доступа извне Docker-сети:
+- `POST /data` — добавить порцию данных (отправка в Kafka)
+- `GET /search?q=...` — поиск через обращение к `data-service`
+- `GET /reports?type=...` — отчёты через обращение к `data-service`
+
+### Data Service
+- Читает сообщения из Kafka и сохраняет в PostgreSQL
+- HTTP API:
+  - `GET /search?q=...` — поиск по БД
+  - `GET /reports?type=...` — отчёты по БД
+
+### Database
+Схема включает 2 связанные таблицы:
+- `posts`
+- `comments` (`comments.post_id` -> `posts.id`)
+
+### Kafka
+Брокер сообщений для передачи данных от `api-service` в `data-service`.
+
+## Формат входных данных (`POST /data`)
+
+Создание поста:
+```json
+{
+  "type": "post",
+  "post": {
+    "author": "Ivan",
+    "title": "Kafka basics",
+    "body": "My first post"
+  }
+}
 ```
 
-## Требования
-- Docker + Docker Compose
-- Go 1.22+ (для локальных проверок без Docker)
-- golangci-lint (для локального `lint`, опционально)
-
-## Локальный запуск в Docker
-1. Создайте `.env` на основе примера:
-```bash
-# Linux/macOS
-cp .env.example .env
+Создание комментария:
+```json
+{
+  "type": "comment",
+  "comment": {
+    "post_id": 1,
+    "author": "Olga",
+    "text": "Nice post"
+  }
+}
 ```
+
+## Отчёты (`GET /reports?type=...`)
+Реализовано 3 разных отчёта:
+- `top_posts_by_comments` — топ-10 постов по числу комментариев
+- `posts_by_day` — количество постов по дням
+- `comments_by_day` — количество комментариев по дням
+
+## Обработка ошибок
+- `400 Bad Request`:
+  - неверный `type` (должен быть `post` или `comment`)
+  - отсутствуют обязательные поля
+  - невалидный JSON
+- `404 Not Found`:
+  - при добавлении комментария, если `post_id` не существует
+- `502 Bad Gateway`:
+  - недоступен `data-service` при валидации `post_id`
+  - недоступен Kafka при отправке данных
+
+## Запуск
+1. Подготовить `.env`:
 ```powershell
-# Windows PowerShell
 Copy-Item .env.example .env
 ```
 
-2. Поднимите сервисы:
-```bash
+2. Запустить:
+```powershell
 docker compose up --build -d
 ```
 
-3. Приложение доступно на `http://localhost:8080`.
+3. API Service доступен на:
+- `http://localhost:8080`
+
+## Примеры запросов
+
+Создать пост (`POST /data`):
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/data" -ContentType "application/json" -Body '{"type":"post","post":{"author":"Ivan","title":"Kafka","body":"Hello"}}'
+```
+
+Создать комментарий (`POST /data`):
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/data" -ContentType "application/json" -Body '{"type":"comment","comment":{"post_id":1,"author":"Olga","text":"Nice post"}}'
+```
+
+Поиск по строке (`GET /search?q=...`):
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/search?q=Kafka"
+```
+
+Поиск без фильтра (`GET /search`):
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/search"
+```
+
+Отчёт: топ постов по комментариям (`GET /reports?type=top_posts_by_comments`):
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/reports?type=top_posts_by_comments"
+```
+
+Отчёт: количество постов по дням (`GET /reports?type=posts_by_day`):
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/reports?type=posts_by_day"
+```
+
+Отчёт: количество комментариев по дням (`GET /reports?type=comments_by_day`):
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/reports?type=comments_by_day"
+```
 
 ## Остановка
-```bash
+```powershell
 docker compose down
 ```
 
-Удалить вместе с volume БД:
-```bash
+С удалением volume БД:
+```powershell
 docker compose down -v
 ```
-
-## Локальные проверки (как в CI)
-Все команды запускаются из `app/src`.
-
-```bash
-go mod download
-go build ./...
-golangci-lint run --config ../../.golangci.yml ./...
-go test ./... -covermode=atomic -coverprofile=coverage.out
-go tool cover -func coverage.out
-```
-
-Порог coverage: **50%**. Ниже порога pipeline падает.
-
-## CI/CD (GitHub Actions)
-Workflow: `.github/workflows/ci.yml`.
-
-Запуск workflow:
-- при `pull_request`
-- при `push` в `main`/`master`
-- при `push` тега
-
-Jobs:
-1. `build` — проверка сборки (`go build ./...`)
-2. `lint` — запуск `golangci-lint`
-3. `test` — тесты + расчет coverage + проверка порога 50%
-4. `docker_build` — сборка Docker-образа с тегом `${branch_or_tag}-${short_sha}`
-5. `docker_push` — push в Docker Hub (только для `main`/`master` и тегов)
-
-### Artifacts и coverage
-- `app/src/coverage.out`
-- `app/src/coverage.txt`
-- coverage-отчет публикуется как GitHub Artifact (`coverage-report`)
-
-### GitHub Secrets для Docker Hub
-Добавить в `Settings -> Secrets and variables -> Actions`:
-- `DOCKERHUB_USERNAME` — логин Docker Hub
-- `DOCKERHUB_TOKEN` — токен Docker Hub
-- `DOCKERHUB_REPOSITORY` — репозиторий вида `username/todo-app`
-
-Секреты не хардкодятся в репозитории.
